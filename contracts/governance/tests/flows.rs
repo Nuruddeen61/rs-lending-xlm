@@ -308,25 +308,20 @@ fn configure_market_oracle_forwards_chainlink_provider() {
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
     let key = PriceKey::Token(asset);
+    let oracle = sample_chainlink_oracle(&env);
 
     gov.execute_immediate(
         &admin,
         &AdminOperation::ConfigureAssetOracle(ConfigureAssetOracleArgs {
             key: key.clone(),
-            oracle: sample_chainlink_oracle(&env),
+            oracle: oracle.clone(),
         }),
     );
 
     let stored = price_aggregator::PriceAggregatorClient::new(&env, &aggregator_id)
         .oracle(&key)
         .expect("oracle");
-    assert!(matches!(
-        stored.sources.get_unchecked(0),
-        PriceSource::Feed(FeedSource {
-            provider: ProviderRef::Chainlink(_),
-            ..
-        })
-    ));
+    assert_eq!(stored, oracle);
 }
 
 #[test]

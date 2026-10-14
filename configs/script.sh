@@ -1091,6 +1091,11 @@ execute_op() {
             echo "ERROR: failed to resolve oracle op ${op_id} args via the governance view." >&2
             exit 1
         fi
+        if [ "$kind" = "price_aggregator" ] && [ "$function" = "set_oracle" ] \
+            && [ "$(jq -r '.resolve.view_fn' "$path")" = "resolve_asset_oracle" ]; then
+            preflight_chainlink_sources "oracle op ${op_id}" \
+                "$(jq -c '.resolve.args.oracle // .resolve.args.cfg' "$path")" || return $?
+        fi
     else
         args_json=$(jq -c '.args' "$path")
     fi
@@ -2760,6 +2765,37 @@ preflight_oracle_sanity() {
     fi
 }
 
+preflight_chainlink_sources() {
+    local label=$1 cfg_json=$2 expected_proxy="" contract data_id decimals max_stale round now
+    while IFS=$'\t' read -r contract data_id decimals max_stale; do
+        if [ -z "$expected_proxy" ]; then
+            expected_proxy=$(get_chainlink_proxy)
+        fi
+        [ "$contract" = "$expected_proxy" ] \
+            || die "${label}: Chainlink source must use the network proxy ${expected_proxy}"
+        printf '%s' "$data_id" | grep -qE '^[0-9a-fA-F]{64}$' \
+            || die "${label}: Chainlink data_id must be 32-byte hex"
+        [ "$decimals" = 18 ] \
+            || die "${label}: Chainlink sources must request 18 decimals"
+        round=$(invoke_view "$contract" latest_round --data_id "$data_id" --decimals "$decimals") \
+            || die "${label}: Chainlink latest_round preflight failed"
+        now=$(date +%s)
+        printf '%s' "$round" | jq -e --argjson now "$now" --argjson max_stale "$max_stale" '
+            type == "object" and
+            (.answer | if type == "string" then test("^[1-9][0-9]*$")
+                       elif type == "number" then . > 0 and . == floor
+                       else false end) and
+            (.round_id | type == "number" and . >= 0 and . == floor) and
+            (.timestamp | type == "number" and . >= 0 and . == floor) and
+            .timestamp <= ($now + 60) and .timestamp + $max_stale >= $now
+        ' >/dev/null || die "${label}: Chainlink latest_round is malformed, non-positive, or stale"
+    done < <(printf '%s' "$cfg_json" | jq -r '
+        .sources[]? | (.Feed // .Scaled.factor) |
+        select(.provider.Chainlink? != null) |
+        [.provider.Chainlink.contract, .provider.Chainlink.data_id, .decimals, .max_stale_seconds] | @tsv
+    ')
+}
+
 schedule_configure_asset_oracle() {
     local label=$1
     local key_json=$2
@@ -2776,10 +2812,18 @@ schedule_configure_asset_oracle() {
     resolve_args=$(jq -nc --argjson key "$key_json" --argjson oracle "$cfg_json" \
         '{key:$key, oracle:$oracle}')
 
-    local agg resolved_args salt_use known_id state gen
+    local agg resolved_args salt_use known_id state gen has_chainlink=false
+    if printf '%s' "$cfg_json" | jq -e '
+        any(.sources[]?; ((.Feed // .Scaled.factor).provider.Chainlink? != null))
+    ' >/dev/null; then
+        has_chainlink=true
+    fi
     agg=$(get_price_aggregator)
     resolved_args=$(resolve_oracle_args_for resolve_asset_oracle "$agg" \
         set_oracle "$key_json" "$cfg_json" 2>/dev/null) || resolved_args=""
+    if [ "$has_chainlink" = true ] && { [ -z "$resolved_args" ] || [ "$resolved_args" = "null" ]; }; then
+        die "Chainlink oracle configuration requires compatible governance and price-aggregator deployments; run 'make ${NETWORK} upgradeAll' first"
+    fi
     if [ -n "$resolved_args" ] && [ "$resolved_args" != "null" ]; then
         read -r salt_use known_id state gen < <(probe_salt_generations "$agg" set_oracle "$resolved_args" "$salt")
         case "$state" in
@@ -2811,6 +2855,8 @@ schedule_configure_asset_oracle() {
             *) ;;
         esac
     fi
+
+    preflight_chainlink_sources "$label" "$cfg_json"
 
     local op_file
     op_file=$(mktemp)

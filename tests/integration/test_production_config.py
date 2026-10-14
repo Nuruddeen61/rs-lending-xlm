@@ -17,6 +17,10 @@ class ProductionPolicyChecks(unittest.TestCase):
         config = Path(__file__).resolve().parents[2] / 'configs'
         markets = load(config / 'mainnet', 'markets.json')
         networks = json.loads((config / 'networks.json').read_text())
+        self.assertEqual(
+            networks['mainnet']['chainlink_data_feeds_proxy'],
+            'CDQBHEUGLDHMSUHG4IH33RJBUTMNCZOT4JIAQR4WZFRDZW6DR6S32ZLZ',
+        )
         usdt0 = next(m for m in markets['markets'] if m['name'] == 'USDT0')
         feeds = [source['Feed'] for source in usdt0['oracle']['sources']]
         providers = {next(iter(feed['provider'])): feed for feed in feeds}

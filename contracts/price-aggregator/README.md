@@ -37,9 +37,15 @@ legs; missing, frozen, malformed, non-positive, oversized, or future-dated
 rounds fail closed. The deployed Stellar proxy has no bulk-read entrypoint, so
 session warming remains limited to RedStone-format providers.
 
-`ProviderRef` is shared by the governance and price-aggregator ABIs. Upgrade
-both contracts before scheduling a Chainlink `ConfigureAssetOracle` operation;
-editing the JSON configuration alone does not change on-chain state.
+`ProviderRef` is shared by the governance and price-aggregator ABIs. Run
+`make <network> upgradeAll` before scheduling a Chainlink
+`ConfigureAssetOracle`; the operator script checks both deployed ABIs and the
+configured live round before proposing. Editing JSON alone does not change
+on-chain state.
+
+Mainnet USDT0 gives the Chainlink leg 93,600 seconds (26 hours) for its
+published 24-hour heartbeat. The same source, asset, deviation, midpoint, and
+sanity gates used by every other provider still apply.
 
 ## Entrypoints
 
