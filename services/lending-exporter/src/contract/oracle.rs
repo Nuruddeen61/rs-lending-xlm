@@ -11,6 +11,7 @@ pub enum OracleKind {
     Reflector,
     RedStone,
     Xoxno,
+    Chainlink,
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +22,8 @@ pub struct OracleSource {
     pub asset_ref: Option<ScVal>,
 
     pub feed_id: Option<String>,
+    pub data_id: Option<ScVal>,
+    pub decimals: u32,
     pub max_stale_seconds: u64,
 }
 
@@ -123,6 +126,7 @@ fn decode_feed_source(value: &ScVal, market_default_max_stale: u64) -> Result<Or
         map_field(value, "provider").ok_or_else(|| anyhow!("feed source missing provider"))?;
     let max_stale_seconds =
         field_u64(value, "max_stale_seconds").unwrap_or(market_default_max_stale);
+    let decimals = field_u32(value, "decimals").unwrap_or(0);
 
     let (tag, payload) =
         enum_variant(provider).ok_or_else(|| anyhow!("provider not enum-tagged"))?;
@@ -139,6 +143,8 @@ fn decode_feed_source(value: &ScVal, market_default_max_stale: u64) -> Result<Or
             contract,
             asset_ref: map_field(inner, "asset").cloned(),
             feed_id: None,
+            data_id: None,
+            decimals,
             max_stale_seconds,
         }),
         "RedStone" | "Xoxno" => {
@@ -152,9 +158,20 @@ fn decode_feed_source(value: &ScVal, market_default_max_stale: u64) -> Result<Or
                 contract,
                 asset_ref: None,
                 feed_id: map_field(inner, "feed_id").and_then(string_text),
+                data_id: None,
+                decimals,
                 max_stale_seconds,
             })
         }
+        "Chainlink" => Ok(OracleSource {
+            kind: OracleKind::Chainlink,
+            contract,
+            asset_ref: None,
+            feed_id: None,
+            data_id: map_field(inner, "data_id").cloned(),
+            decimals,
+            max_stale_seconds,
+        }),
         other => Err(anyhow!("unknown provider variant {other}")),
     }
 }
@@ -209,10 +226,16 @@ pub fn decode_redstone_price(value: &ScVal) -> Result<PriceObservation> {
     })
 }
 
+pub fn decode_chainlink_round(value: &ScVal) -> Result<PriceObservation> {
+    let ts = field_u64(value, "timestamp")
+        .ok_or_else(|| anyhow!("Chainlink Round.timestamp missing"))?;
+    Ok(PriceObservation { feed_ts_secs: ts })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_xdr::{Int128Parts, ScMap, ScMapEntry, ScVec, VecM};
+    use stellar_xdr::{BytesM, Int128Parts, ScBytes, ScMap, ScMapEntry, ScVec, VecM};
 
     fn sym(t: &str) -> ScVal {
         ScVal::Symbol(crate::keys::symbol(t).unwrap())
@@ -289,6 +312,24 @@ mod tests {
         ])
     }
 
+    fn chainlink_feed(contract_byte: u8, max_stale: u64) -> ScVal {
+        let data_id = ScVal::Bytes(ScBytes(BytesM::try_from(vec![7; 32]).unwrap()));
+        map(vec![
+            (
+                "provider",
+                enum_val(
+                    "Chainlink",
+                    vec![map(vec![
+                        ("contract", addr(contract_byte)),
+                        ("data_id", data_id),
+                    ])],
+                ),
+            ),
+            ("decimals", ScVal::U32(18)),
+            ("max_stale_seconds", ScVal::U64(max_stale)),
+        ])
+    }
+
     fn asset_oracle(sources: Vec<ScVal>) -> ScVal {
         map(vec![
             ("asset_decimals", ScVal::U32(7)),
@@ -325,6 +366,25 @@ mod tests {
             decode_reflector_price(&m).unwrap().unwrap().feed_ts_secs,
             42
         );
+    }
+
+    #[test]
+    fn decodes_chainlink_round_timestamp_in_seconds() {
+        let round = map(vec![("timestamp", ScVal::U64(1_700_000_000))]);
+        assert_eq!(
+            decode_chainlink_round(&round).unwrap().feed_ts_secs,
+            1_700_000_000
+        );
+    }
+
+    #[test]
+    fn decodes_chainlink_provider_data_id_and_decimals() {
+        let oracle = asset_oracle(vec![enum_val("Feed", vec![chainlink_feed(8, 93_600)])]);
+        let cfg = decode_oracle_config(&oracle).unwrap();
+        assert_eq!(cfg.sources[0].kind, OracleKind::Chainlink);
+        assert_eq!(cfg.sources[0].decimals, 18);
+        assert!(cfg.sources[0].data_id.is_some());
+        assert_eq!(cfg.sources[0].max_stale_seconds, 93_600);
     }
 
     #[test]

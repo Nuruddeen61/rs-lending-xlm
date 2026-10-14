@@ -245,6 +245,10 @@ get_redstone_adapter() {
     get_network_value "redstone_adapter_contract"
 }
 
+get_chainlink_proxy() {
+    get_network_value "chainlink_data_feeds_proxy"
+}
+
 get_xoxno_oracle_adapter() {
     get_network_value "xoxno_oracle_adapter"
 }
@@ -1202,11 +1206,12 @@ validate_configs() {
         fi
     done
 
-    local cex dex fx redstone xoxno_adapter
+    local cex dex fx redstone chainlink xoxno_adapter
     cex=$(get_cex_oracle)
     dex=$(get_dex_oracle)
     fx=$(get_fx_oracle)
     redstone=$(get_redstone_adapter)
+    chainlink=$(get_chainlink_proxy)
     xoxno_adapter=$(get_xoxno_oracle_adapter)
 
     local dup
@@ -1220,6 +1225,7 @@ validate_configs() {
     fi
 
     local oracle_bot_heartbeat_seconds=3600
+    local chainlink_heartbeat_seconds=86400
     local max_leg_age_spread_seconds=3600
     local m mj hub addr missing o strat anchor_tag minw maxw ptag pcontract atag acontract pstale astale
     for m in $(jq -r '.markets[].name' "$MARKET_CONFIG_FILE"); do
@@ -1289,7 +1295,7 @@ validate_configs() {
         if printf '%s' "$o" | jq -e --argjson cap "$max_leg_age_spread_seconds" '
             (.sources | length) == 2 and
             ([.sources[] | (.Feed // .Scaled.factor) | select(. != null) |
-                if (.provider | has("Reflector")) then "Market"
+                if (.provider | (has("Reflector") or has("Chainlink"))) then "Market"
                 else (.provider.RedStone // .provider.Xoxno).nature end
              ] | length == 2 and all(. == "Market")) and
             ([.sources[] | (.Feed // .Scaled.factor).max_stale_seconds] | any(. > $cap))
@@ -1323,11 +1329,13 @@ validate_configs() {
                 fstale=$(printf '%s' "$sjson" | jq -r '.Feed.max_stale_seconds // "missing"')
                 pkind=$(printf '%s' "$sjson" | jq -r '
                     if .Feed.provider | has("Reflector") then "Reflector"
+                    elif .Feed.provider | has("Chainlink") then "Chainlink"
                     elif .Feed.provider | has("RedStone") then "RedStone"
                     elif .Feed.provider | has("Xoxno") then "Xoxno"
                     else "unknown" end')
                 pcontract=$(printf '%s' "$sjson" | jq -r '
                     if .Feed.provider | has("Reflector") then .Feed.provider.Reflector.contract
+                    elif .Feed.provider | has("Chainlink") then .Feed.provider.Chainlink.contract
                     elif .Feed.provider | has("RedStone") then .Feed.provider.RedStone.contract
                     elif .Feed.provider | has("Xoxno") then .Feed.provider.Xoxno.contract
                     else "" end')
@@ -1335,11 +1343,13 @@ validate_configs() {
                 fstale=$(printf '%s' "$sjson" | jq -r '.Scaled.factor.max_stale_seconds // "missing"')
                 pkind=$(printf '%s' "$sjson" | jq -r '
                     if .Scaled.factor.provider | has("Reflector") then "Reflector"
+                    elif .Scaled.factor.provider | has("Chainlink") then "Chainlink"
                     elif .Scaled.factor.provider | has("RedStone") then "RedStone"
                     elif .Scaled.factor.provider | has("Xoxno") then "Xoxno"
                     else "unknown" end')
                 pcontract=$(printf '%s' "$sjson" | jq -r '
                     if .Scaled.factor.provider | has("Reflector") then .Scaled.factor.provider.Reflector.contract
+                    elif .Scaled.factor.provider | has("Chainlink") then .Scaled.factor.provider.Chainlink.contract
                     elif .Scaled.factor.provider | has("RedStone") then .Scaled.factor.provider.RedStone.contract
                     elif .Scaled.factor.provider | has("Xoxno") then .Scaled.factor.provider.Xoxno.contract
                     else "" end')
@@ -1435,6 +1445,25 @@ validate_configs() {
                         vc_err "market ${m}: sources[$i] RedStone max_stale_seconds ${fstale} < 4x oracle bot heartbeat (${oracle_bot_heartbeat_seconds}s)"
                     fi
                     ;;
+                Chainlink)
+                    if [ -n "$pcontract" ] && [ "$pcontract" != "$chainlink" ]; then
+                        vc_err "market ${m}: sources[$i] Chainlink contract differs from networks.json chainlink_data_feeds_proxy"
+                    fi
+                    local chainlink_data_id chainlink_decimals
+                    chainlink_data_id=$(printf '%s' "$sjson" | jq -r '
+                        ((.Feed // .Scaled.factor).provider.Chainlink.data_id) // ""')
+                    chainlink_decimals=$(printf '%s' "$sjson" | jq -r '
+                        ((.Feed // .Scaled.factor).decimals) // 0')
+                    if ! printf '%s' "$chainlink_data_id" | grep -qE '^[0-9a-fA-F]{64}$'; then
+                        vc_err "market ${m}: sources[$i] Chainlink data_id must be 32-byte hex"
+                    fi
+                    if [ "$chainlink_decimals" -ne 18 ]; then
+                        vc_err "market ${m}: sources[$i] Chainlink decimals must be 18"
+                    fi
+                    if [ "$fstale" != "missing" ] && [ "$fstale" -lt "$chainlink_heartbeat_seconds" ]; then
+                        vc_err "market ${m}: sources[$i] Chainlink max_stale_seconds ${fstale} < published heartbeat (${chainlink_heartbeat_seconds}s)"
+                    fi
+                    ;;
                 Xoxno)
                     if [ -n "$pcontract" ] && [ "$pcontract" != "$xoxno_adapter" ]; then
                         vc_warn "market ${m}: sources[$i] Xoxno contract differs from networks.json xoxno_oracle_adapter"
@@ -1463,7 +1492,7 @@ validate_configs() {
         if printf '%s' "$ro" | jq -e --argjson cap "$max_leg_age_spread_seconds" '
             (.sources | length) == 2 and
             ([.sources[] | (.Feed // .Scaled.factor) | select(. != null) |
-                if (.provider | has("Reflector")) then "Market"
+                if (.provider | (has("Reflector") or has("Chainlink"))) then "Market"
                 else (.provider.RedStone // .provider.Xoxno).nature end
              ] | length == 2 and all(. == "Market")) and
             ([.sources[] | (.Feed // .Scaled.factor).max_stale_seconds] | any(. > $cap))
@@ -3812,6 +3841,7 @@ show_info() {
     echo "Reflector DEX: $(get_dex_oracle)"
     echo "Reflector FX:  $(get_fx_oracle)"
     echo "RedStone adapter: $(get_redstone_adapter)"
+    echo "Chainlink Data Feeds proxy: $(get_chainlink_proxy)"
     echo "XOXNO oracle adapter (networks.json, NOT chain-verified): $(get_oracle_adapter_address 2>/dev/null || echo 'not set (make <network> deployOracleAdapter)')"
 
     local agg_addr adapter_addr
@@ -3822,7 +3852,8 @@ show_info() {
         echo "Oracle adapter owner (chain-verified): $(invoke_view "$adapter_addr" get_owner 2>/dev/null | tail -n1 || echo 'read failed')"
     fi
 
-    echo "RedStone markets: $(jq -r '[.markets[] | select(any(.oracle.sources[]?; .Feed.provider.RedStone? != null)) | .name] | if length == 0 then "none" else join(", ") end' "$MARKET_CONFIG_FILE" 2>/dev/null || echo "n/a")"
+    echo "RedStone markets: $(jq -r '[.markets[] | select(any(.oracle.sources[]?; ((.Feed // .Scaled.factor).provider.RedStone? != null))) | .name] | if length == 0 then "none" else join(", ") end' "$MARKET_CONFIG_FILE" 2>/dev/null || echo "n/a")"
+    echo "Chainlink markets: $(jq -r '[.markets[] | select(any(.oracle.sources[]?; ((.Feed // .Scaled.factor).provider.Chainlink? != null))) | .name] | if length == 0 then "none" else join(", ") end' "$MARKET_CONFIG_FILE" 2>/dev/null || echo "n/a")"
 }
 
 check_delay() {
@@ -4610,6 +4641,25 @@ query_redstone_cmd() {
     invoke_view "$adapter" read_prices --feed_ids "$feed_ids_json"
 }
 
+query_chainlink_cmd() {
+    local data_id=$1
+    local proxy=${2:-$(get_chainlink_proxy)}
+    local decimals=${3:-18}
+    if [ -z "$data_id" ] || [ -z "$proxy" ] || [ "$proxy" = "null" ]; then
+        echo "Usage: $0 queryChainlink <data_id> [proxy_contract] [decimals=18]" >&2
+        exit 1
+    fi
+    echo "=== Chainlink proxy (${proxy}) data_id=${data_id} decimals=${decimals} ===" >&2
+    echo "latest_round:" >&2
+    invoke_view "$proxy" latest_round --data_id "$data_id" --decimals "$decimals"
+    echo "description:" >&2
+    invoke_view "$proxy" description --data_id "$data_id"
+    echo "native decimals:" >&2
+    invoke_view "$proxy" decimals --data_id "$data_id"
+    echo "minimum decimals:" >&2
+    invoke_view "$proxy" get_min_decimals --data_id "$data_id"
+}
+
 oracle_union_tag() {
     jq -r 'if type == "object" and has("tag") then .tag else keys_unsorted[0] end'
 }
@@ -4662,7 +4712,7 @@ describe_oracle_source() {
             body=$(printf '%s' "$factor_json" | jq -c '.provider' | oracle_union_value)
             echo "[${label}] Scaled quote=${quote} factor_provider=${provider_tag}" >&2
             ;;
-        Reflector|RedStone|Xoxno)
+        Reflector|RedStone|Xoxno|Chainlink)
 
             provider_tag="$shape"
             body=$(printf '%s' "$source_json" | oracle_union_value)
@@ -4690,6 +4740,12 @@ describe_oracle_source() {
             feed_id=$(printf '%s' "$body" | jq -r '.feed_id // empty')
             nature=$(printf '%s' "$body" | jq -r '.nature // empty')
             echo "[${label}] ${provider_tag} nature=${nature} contract=${contract} feed_id=${feed_id} decimals=${feed_decimals} max_stale=${feed_stale}" >&2
+            ;;
+        Chainlink)
+            local contract data_id
+            contract=$(printf '%s' "$body" | jq -r '.contract // empty')
+            data_id=$(printf '%s' "$body" | jq -r '.data_id // empty')
+            echo "[${label}] Chainlink nature=Market contract=${contract} data_id=${data_id} decimals=${feed_decimals} max_stale=${feed_stale}" >&2
             ;;
         *)
             echo "[${label}] unknown provider ${provider_tag}: ${source_json}" >&2
@@ -5314,7 +5370,10 @@ case "$1" in
         query_reflector_twap_cmd "$2" "$3" "$4" "$5"
         ;;
     "queryRedStone")
-        query_redstone_cmd "$2"
+        query_redstone_cmd "$2" "$3"
+        ;;
+    "queryChainlink")
+        query_chainlink_cmd "$2" "$3" "$4"
         ;;
     "getOracle")
         if [ -z "$2" ]; then
@@ -5487,6 +5546,7 @@ case "$1" in
         echo "  queryReflectorPrice <oracle> stellar|other <sym|sac> lastprice"
         echo "  queryReflectorTwap  <oracle> stellar|other <sym|sac> [records] prices history"
         echo "  queryRedStone <feed_id> [adapter]                    RedStone multi-feed price data"
+        echo "  queryChainlink <data_id> [proxy] [decimals=18]       Chainlink latest round and metadata"
         echo ""
         echo "Examples:"
         echo "  NETWORK=testnet $0 getPrice USDC"

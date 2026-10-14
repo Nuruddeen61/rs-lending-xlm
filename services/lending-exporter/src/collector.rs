@@ -856,6 +856,23 @@ async fn read_feed_timestamp(
                 .ok()
                 .map(|o| o.feed_ts_secs)
         }
+        oracle::OracleKind::Chainlink => {
+            let data_id = source.data_id.clone()?;
+            let scv = read_view(
+                client,
+                metrics,
+                net,
+                "latest_round",
+                &market.asset_strkey,
+                &contract,
+                "latest_round",
+                vec![data_id, ScVal::U32(source.decimals)],
+            )
+            .await?;
+            oracle::decode_chainlink_round(&scv)
+                .ok()
+                .map(|o| o.feed_ts_secs)
+        }
     }
 }
 

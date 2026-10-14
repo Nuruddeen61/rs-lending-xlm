@@ -31,6 +31,16 @@ A price must pass three gates:
 3. **Sanity**: the final price is not positive (`InvalidPrice`) or is outside
    `[min_sanity_price_wad, max_sanity_price_wad]` (`SanityBoundViolated`).
 
+Chainlink sources store the network proxy address plus a 32-byte `data_id` and
+read `latest_round(data_id, 18)` once per source. They are unsmoothed market
+legs; missing, frozen, malformed, non-positive, oversized, or future-dated
+rounds fail closed. The deployed Stellar proxy has no bulk-read entrypoint, so
+session warming remains limited to RedStone-format providers.
+
+`ProviderRef` is shared by the governance and price-aggregator ABIs. Upgrade
+both contracts before scheduling a Chainlink `ConfigureAssetOracle` operation;
+editing the JSON configuration alone does not change on-chain state.
+
 ## Entrypoints
 
 `prices` and `quotes` are bulk only. Pass a `Vec<PriceKey>` even for one key.
@@ -66,7 +76,7 @@ validation.rs   # write-time config checks (sources, depth, staleness, decimals)
 tolerance.rs    # dual-source disagreement bounds
 observation.rs  # provider payload → normalized WAD observation
 properties.rs   # write-time dependency walk
-providers/      # aquarius (LP) + multi_feed (bulk) + reflector
+providers/      # aquarius (LP) + chainlink + multi_feed (bulk) + reflector
 ```
 
 ## References

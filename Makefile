@@ -1951,7 +1951,7 @@ POSITIONAL_ACCOUNT_ACTIONS := getHealth getAccount getCollateralUsd getBorrowUsd
                               getLtvUsd getLiqAvailable canLiquidate
 POSITIONAL_ACCOUNT_MARKET_ACTIONS := getCollateral getBorrow maxWithdraw maxSupply maxBorrow
 POSITIONAL_ACCOUNT_ROLE_ACTIONS := hasRole grantGovRole revokeGovRole
-REFLECTOR_PROBE_ACTIONS := queryReflector queryReflectorPrice queryReflectorTwap queryRedStone
+REFLECTOR_PROBE_ACTIONS := queryReflector queryReflectorPrice queryReflectorTwap queryRedStone queryChainlink
 VARARG_ACTIONS := updateIndexes claimRevenue supply borrow withdraw getLiquidationEstimate \
 	claimAggregatorAdminFees sweepAggregatorBalance tightenAssetFlags relaxAssetFlags
 
@@ -2138,7 +2138,7 @@ help:
 	$(call ROW,make help-deploy,setup | upgrades | mainnet env | flash receiver)
 	$(call ROW,make help-ops,governance | markets | spokes | positions | control)
 	$(call ROW,make help-views,read-only probes (controller + pool))
-	$(call ROW,make help-oracle,adapter | feeds | Reflector | RedStone)
+	$(call ROW,make help-oracle,adapter | feeds | Reflector | RedStone | Chainlink)
 	$(call ROW,make help-aggregator,swap aggregator admin + ownership)
 	$(call ROW,make help-all,print every topic (grep-friendly))
 	$(call BLANK)
@@ -2359,6 +2359,7 @@ help-oracle:
 	$(call NOTE,make <n> queryReflectorPrice C other|stellar ASSET     (lastprice))
 	$(call ROW,make <n> queryReflectorTwap C other ASSET N,prices history)
 	$(call NOTE,make <n> queryRedStone FEED_ID [adapter])
+	$(call NOTE,make <n> queryChainlink DATA_ID [proxy] [decimals=18])
 	$(call BLANK)
 
 
