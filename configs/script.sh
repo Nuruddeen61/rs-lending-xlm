@@ -4307,6 +4307,18 @@ claim_aggregator_admin_fees() {
         -- claim_admin_fees --recipient "$recipient" --tokens "$tokens_json"
 }
 
+claim_aggregator_referral_fees() {
+    local id=$1
+    shift || true
+    [ -n "$id" ] && [ $# -ge 1 ] || die "Usage: $0 claimAggregatorReferralFees <id> <token> [token...]"
+    local router tokens_json
+    router=$(get_aggregator_address) || die "No aggregator deployed for ${NETWORK}."
+    tokens_json=$(_json_addr_vec "$@")
+    echo "=== claim_referral_fees ${id} on aggregator ${router} (${NETWORK}; pays stored owner) ===" >&2
+    stellar contract invoke --instruction-leeway "${INSTRUCTION_LEEWAY:-20000000}" --id "$router" $SOURCE_FLAG --network "$NETWORK" \
+        -- claim_referral_fees --id "$id" --tokens "$tokens_json"
+}
+
 sweep_aggregator_balance() {
     local recipient=$1
     shift || true
@@ -4943,6 +4955,10 @@ case "$1" in
         shift
         claim_aggregator_admin_fees "$@"
         ;;
+    "claimAggregatorReferralFees")
+        shift
+        claim_aggregator_referral_fees "$@"
+        ;;
     "sweepAggregatorBalance")
         shift
         sweep_aggregator_balance "$@"
@@ -5541,6 +5557,7 @@ case "$1" in
         echo "  setAggregatorReferralFee <id> <fee_bps> / setAggregatorReferralActive <id> <true|false>"
         echo "  setAggregatorReferralOwner <id> <new_owner>"
         echo "  claimAggregatorAdminFees <recipient> <token> [token...]"
+        echo "  claimAggregatorReferralFees <id> <token> [token...]  (any signer; pays stored owner)"
         echo "  sweepAggregatorBalance <recipient> <token> [token...]"
         echo "  upgradeAggregatorHash <wasm_hash>       (make <net> upgradeAggregator builds+uploads+invokes)"
         echo "  upgradeOracleAdapterHash <wasm_hash>    (make <net> upgradeOracleAdapter builds+uploads+invokes)"
