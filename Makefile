@@ -1953,7 +1953,7 @@ POSITIONAL_ACCOUNT_MARKET_ACTIONS := getCollateral getBorrow maxWithdraw maxSupp
 POSITIONAL_ACCOUNT_ROLE_ACTIONS := hasRole grantGovRole revokeGovRole
 REFLECTOR_PROBE_ACTIONS := queryReflector queryReflectorPrice queryReflectorTwap queryRedStone
 VARARG_ACTIONS := updateIndexes claimRevenue supply borrow withdraw getLiquidationEstimate \
-	claimAggregatorAdminFees sweepAggregatorBalance tightenAssetFlags relaxAssetFlags
+	claimAggregatorAdminFees claimAggregatorReferralFees sweepAggregatorBalance tightenAssetFlags relaxAssetFlags
 
 
 
@@ -2380,6 +2380,7 @@ help-aggregator:
 	$(call NOTE,setAggregatorReferralFee ID BPS | setAggregatorReferralActive ID BOOL)
 	$(call NOTE,setAggregatorReferralOwner ID NEW_OWNER)
 	$(call NOTE,claimAggregatorAdminFees RECIPIENT TOKEN...)
+	$(call NOTE,claimAggregatorReferralFees ID TOKEN...  (any signer; pays referral owner))
 	$(call NOTE,sweepAggregatorBalance RECIPIENT TOKEN...)
 	$(call BLANK)
 	$(call H2,Ownership (OZ Ownable two-step))

@@ -177,7 +177,6 @@ pub(crate) fn resolve_op(env: &Env, op: &AdminOperation) -> ResolvedOperation {
             ],
             DelayTier::Sensitive,
         ),
-
         AdminOperation::SetSwapAggregator(addr) => {
             validate::require_contract_address(env, addr, OracleError::InvalidAggregator);
             sensitive_controller_operation(
